@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solicitudes · Comercial Aurora</title>
+<style>/* CSS */</style>
+</head>
+<body>
+<aside class="rail">
+  <div class="brand"><span class="mark" aria-hidden="true">✳</span><div>Comercial Aurora<small>Atención al cliente</small></div></div>
+  <nav id="navigation" aria-label="Navegación" hidden>
+    <button type="button" data-page="tickets" aria-current="page"><span aria-hidden="true">▤</span> Solicitudes</button>
+    <button type="button" data-page="clients"><span aria-hidden="true">♧</span> Directorio</button>
+    <button type="button" data-page="team" hidden><span aria-hidden="true">◉</span> Equipo</button>
+  </nav>
+  <div class="rail-bottom">
+    <div id="local-tools" hidden>
+      <label for="profile">Perfil de prueba</label><select id="profile"></select>
+      <button id="export" type="button">Exportar respaldo</button>
+      <button id="restore" type="button">Restaurar respaldo</button>
+      <input id="backup-file" type="file" accept=".json,application/json" hidden>
+    </div>
+    <a id="demo-link" href="/demo.html" hidden>Descargar demo HTML</a>
+    <button id="logout" type="button" hidden>Cerrar sesión</button>
+  </div>
+</aside>
+<main>
+  <header class="top"><span id="mode"></span><strong id="account"></strong></header>
+  <div class="content">
+    <div id="notice" class="notice" role="status" hidden></div>
+    <section id="login" hidden>
+      <h1>Iniciar sesión</h1>
+      <form id="login-form" class="panel stack">
+        <label>Cuenta<select name="user" required></select></label>
+        <label>Código de acceso<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="primary">Entrar</button>
+      </form>
+    </section>
+    <section id="tickets" hidden>
+      <div class="heading"><div><h1>Solicitudes</h1><p>Consulta y da seguimiento a los casos de atención.</p></div><button id="new" class="primary" type="button">+ Nueva solicitud</button></div>
+      <div class="stats" id="stats"></div>
+      <section class="panel">
+        <div class="panel-title"><h2>Bandeja de atención</h2><button id="refresh" class="secondary" type="button">Actualizar</button></div>
+        <form id="filters" class="filters">
+          <label>Buscar<input name="query" type="search" placeholder="Ticket, NIT o cliente"></label>
+          <label>Estado<select name="status"></select></label>
+          <label>Responsable<select name="agent"></select></label>
+          <label>Antigüedad<select name="age"><option value="">Cualquiera</option><option value="recent">Hasta 48 horas</option><option value="older">Más de 48 horas</option></select></label>
+        </form>
+        <div id="ticket-table" class="table-scroll"></div>
+      </section>
+    </section>
+    <section id="clients" hidden>
+      <div class="heading"><div><h1>Directorio</h1><p>Busca clientes por NIT o razón social.</p></div></div>
+      <section class="panel">
+        <div class="panel-title"><label>Buscar cliente<input id="client-query" type="search" placeholder="NIT o razón social"></label></div>
+        <div id="import-box" class="import" hidden>
+          <label>Importar clientes<input id="import-file" type="file" accept=".csv,.json"></label>
+          <button class="secondary" id="import" type="button">Importar</button>
+          <small>El CSV debe incluir nit y razon_social. En JSON usa un arreglo con esos campos.</small>
+          <div id="import-report" role="status"></div>
+        </div>
+        <div id="client-table" class="table-scroll"></div>
+      </section>
+    </section>
+    <section id="team" hidden><div class="heading"><div><h1>Equipo</h1><p>Gestiona quién recibe nuevas solicitudes.</p></div></div><section class="panel" id="team-list"></section></section>
+  </div>
+</main>
+<dialog id="create-dialog" aria-labelledby="create-title">
+  <div class="dialog-head"><h2 id="create-title">Nueva solicitud</h2><button class="close" type="button" data-close="create-dialog" aria-label="Cerrar">×</button></div>
+  <form id="create-form" class="stack">
+    <label>NIT del cliente<input name="nit" list="client-options" autocomplete="off" required><datalist id="client-options"></datalist></label>
+    <div id="client-match" aria-live="polite"></div>
+    <div class="form-line"><label>Canal<select name="channel" required></select></label><label>Tipo de solicitud<select name="type" required></select></label></div>
+    <label>Referencia de pedido <small>(opcional)</small><input name="order" maxlength="80"></label>
+    <label>Descripción<textarea name="description" required minlength="10" maxlength="4000" rows="4"></textarea></label>
+    <p id="create-error" class="error" role="alert" hidden></p>
+    <button class="primary">Radicar solicitud</button>
+  </form>
+</dialog>
+<dialog id="detail-dialog" aria-labelledby="detail-title">
+  <div class="dialog-head"><h2 id="detail-title">Detalle de solicitud</h2><button class="close" type="button" data-close="detail-dialog" aria-label="Cerrar">×</button></div>
+  <div id="detail-content"></div>
+  <form id="detail-form" class="stack">
+    <div class="form-line" id="detail-fields"></div>
+    <label id="response-field" hidden>Respuesta al cliente<textarea name="response" maxlength="4000" rows="3"></textarea></label>
+    <p id="detail-error" class="error" role="alert" hidden></p>
+    <div class="actions"><button class="primary" id="save-detail">Guardar cambios</button><button class="secondary" id="reload-detail" type="button" hidden>Recargar caso</button></div>
+  </form>
+  <h3>Historial</h3><ol id="history"></ol>
+</dialog>
+<script>/* JS */</script>
+</body>
+</html>

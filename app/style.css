@@ -83,3 +83,9 @@ dt{font-weight:650}dd{margin:0}
 @media(max-width:1000px){.filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:740px){body{display:block}.rail{min-height:0;gap:12px;padding:12px 14px}.rail nav,.rail-bottom,#local-tools{display:flex;align-items:center;flex-wrap:wrap}.rail-bottom{margin:0}#local-tools select{width:auto}.rail button,.rail a{padding:7px}.heading{align-items:flex-start}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:410px){.heading{flex-direction:column}.form-line{grid-template-columns:1fr}}
+#next-action{margin:0;padding:12px;border:1px solid var(--line);border-radius:8px;min-width:0}
+#next-action legend{font-weight:700;padding:0 5px}
+#related-tickets,.summary-panel{padding:14px 18px}
+#related-tickets{background:var(--back);border-radius:8px}
+#related-tickets ul,.summary-panel ul{margin-bottom:0;padding-left:22px}
+.summary-panel + .summary-panel{margin-top:13px}

@@ -1,4 +1,4 @@
-import { agents, channels, createTicket, eventValue, hours, importClients, initialState, overdue, people, readClients, restoreBackup, setAvailability, snapshot, states, transitions, types, updateTicket } from './domain.mjs';
+import { agents, channels, createTicket, eventValue, hours, importClients, initialState, overdue, pending, people, readClients, restoreBackup, setAvailability, slaNotice, snapshot, states, transitions, types, updateTicket, weeklySummary } from './domain.mjs';
 
 const local = document.documentElement.dataset.mode === 'demo';
 const hosted = document.documentElement.dataset.mode === 'hosted';
@@ -65,13 +65,14 @@ async function refresh() {
 function render() {
   const signedIn = Boolean(actor);
   const coordinator = actor?.role === 'coordinator';
-  if (!coordinator && currentPage === 'team') currentPage = 'tickets';
+  if (!coordinator && ['team', 'summary'].includes(currentPage)) currentPage = 'tickets';
   $('#login').hidden = signedIn;
   $('#navigation').hidden = !signedIn;
   $('#logout').hidden = local || hosted || !signedIn;
   $('#account').textContent = actor?.name ?? '';
   $('[data-page="team"]').hidden = !coordinator;
-  for (const key of ['tickets', 'clients', 'team']) {
+  $('[data-page="summary"]').hidden = !coordinator;
+  for (const key of ['tickets', 'clients', 'team', 'summary']) {
     $('#' + key).hidden = !signedIn || key !== currentPage;
     $('[data-page="' + key + '"]').setAttribute('aria-current', key === currentPage ? 'page' : 'false');
   }
@@ -83,6 +84,8 @@ function render() {
   renderClients();
   if (currentPage === 'interactions') renderInteractions();
   renderTeam();
+  if (coordinator && currentPage === 'summary') renderSummary();
+  if ($('#create-dialog').open) renderRelatedTickets();
 }
 
 const normalize = value => String(value).normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
@@ -93,7 +96,7 @@ function matches(query, ...values) {
 
 function renderTickets() {
   const now = Date.now();
-  const { query, status, agent, age } = inputs($('#filters'));
+  const { query, status, agent, age, sort } = inputs($('#filters'));
   const tickets = data.tickets;
   const open = tickets.filter(ticket => !ticket.resolvedAt);
   const cards = [
@@ -107,16 +110,21 @@ function renderTickets() {
   const shown = tickets.filter(ticket => matches(query, ticket.id, ticket.nit, ticket.clientName) &&
     (!status || ticket.status === status) && (!agent || ticket.agent === agent) &&
     (!age || (hours(ticket.receivedAt, now) > 48) === (age === 'older')));
+  if (sort === 'sla') shown.sort((a, b) =>
+    Number(Boolean(a.resolvedAt)) - Number(Boolean(b.resolvedAt)) ||
+    (a.resolvedAt && b.resolvedAt ? Date.parse(b.receivedAt) - Date.parse(a.receivedAt) : Date.parse(a.receivedAt) - Date.parse(b.receivedAt)));
   if (!shown.length) {
     $('#ticket-table').innerHTML = '<p class="empty">No hay solicitudes que coincidan con la búsqueda.</p>';
     return;
   }
   $('#ticket-table').innerHTML = '<table><thead><tr><th>Ticket</th><th>Cliente</th><th>Estado</th><th>Responsable</th><th>Recepción</th></tr></thead><tbody>' +
     shown.map(ticket => {
-      const late = overdue(ticket, now), style = late ? 'late' : ticket.resolvedAt ? 'done' : ticket.status.startsWith('Pendiente') ? 'wait' : '';
+      const alert = slaNotice(ticket, now);
+      const style = alert === 'Vencida' || alert === 'Plazo crítico' ? 'late' : ticket.resolvedAt ? 'done' :
+        alert || pending(ticket.status) ? 'wait' : '';
       return '<tr><td><button class="ticket-link" type="button" data-ticket="' + escape(ticket.id) + '">' + escape(ticket.id) + '</button></td>' +
         '<td class="client-cell">' + escape(ticket.clientName) + '<small>' + escape(ticket.nit) + '</small></td>' +
-        '<td><span class="badge ' + style + '">' + escape(ticket.status) + (late ? ' · Vencida' : '') + '</span></td>' +
+        '<td><span class="badge ' + style + '">' + escape(ticket.status) + (alert ? ' · ' + alert : '') + '</span></td>' +
         '<td>' + escape(nameOf(ticket.agent)) + '</td><td>' + escape(date.format(new Date(ticket.receivedAt))) + '</td></tr>';
     }).join('') + '</tbody></table>';
 }
@@ -154,6 +162,38 @@ function renderTeam() {
     '> Disponible</label></div>').join('');
 }
 
+function renderSummary() {
+  const { received, resolved, onTime, openByAgent, complaints } = weeklySummary(data.tickets);
+  const percent = resolved ? (onTime / resolved).toLocaleString('es-CO', { style: 'percent', maximumFractionDigits: 1 }) : '—';
+  const list = rows => '<ul>' + rows.map(([label, value]) => '<li>' + escape(label) + ' · ' + value + '</li>').join('') + '</ul>';
+  $('#summary-content').innerHTML = '<div class="stats">' +
+    [['Recibidas', received], ['Resueltas', resolved], ['Resueltas en 48 h', percent]].map(([label, value]) =>
+      '<div class="stat"><span>' + label + '</span><strong>' + value + '</strong></div>').join('') + '</div>' +
+    '<section class="panel summary-panel"><h2>Abiertas por responsable</h2>' + list(openByAgent.map(row => [row.name, row.count])) +
+    '</section><section class="panel summary-panel"><h2>Motivos de reclamo</h2>' +
+    (complaints.length ? list(complaints.map(row => [row.type, row.count])) : '<p>No hay reclamos registrados en este periodo.</p>') + '</section>';
+}
+
+function renderRelatedTickets() {
+  const fields = $('#create-form').elements;
+  const nit = fields.nit.value.trim();
+  const client = data.clients.find(entry => entry.nit === nit);
+  $('#client-match').textContent = client?.name ?? (nit ? 'No hay coincidencias.' : '');
+  const order = normalize(fields.order.value.trim());
+  const related = client ? data.tickets.filter(ticket => ticket.nit === nit && !ticket.resolvedAt) : [];
+  const sameOrder = ticket => order && normalize(ticket.order?.trim() ?? '') === order;
+  related.sort((first, second) => Number(Boolean(sameOrder(second))) - Number(Boolean(sameOrder(first))));
+  $('#related-tickets').hidden = !related.length;
+  $('#related-tickets').innerHTML = related.length ? '<strong>Solicitudes abiertas del cliente</strong><ul>' +
+    related.map(ticket => '<li><button type="button" class="ticket-link" data-ticket="' + escape(ticket.id) + '">' +
+      escape(ticket.id) + '</button> · ' + escape(ticket.type) + (sameOrder(ticket) ? ' · Mismo pedido' : '') + '</li>').join('') + '</ul>' : '';
+}
+
+function syncDetailFields(status) {
+  $('#response-field').hidden = status !== 'Resuelto' || editing.status === 'Resuelto';
+  $('#next-action').hidden = $('#next-action').disabled = !pending(status);
+}
+
 function showTicket(id) {
   const ticket = data?.tickets.find(entry => entry.id === id);
   if (!ticket) {
@@ -168,6 +208,8 @@ function showTicket(id) {
     ['Tipo', ticket.type], ['Canal', ticket.channel],
     ['Recepción', date.format(new Date(ticket.receivedAt))], ['Responsable', nameOf(ticket.agent)],
     ['Descripción', ticket.description],
+    ...(ticket.nextAction ? [['Próxima acción', ticket.nextAction.description],
+      ['Debe responder', ticket.nextAction.responsible], ['Revisión', ticket.nextAction.reviewDate]] : []),
   ];
   if (ticket.order) facts.push(['Pedido', ticket.order]);
   if (ticket.resolvedAt) {
@@ -184,7 +226,11 @@ function showTicket(id) {
         .map(agent => option(agent.id, agent.name)).join('') + '</select></label>' : '');
   if (coordinator) $('#detail-form').elements.agent.value = ticket.agent;
   $('#detail-form').elements.response.value = '';
-  $('#response-field').hidden = true;
+  const fields = $('#detail-form').elements;
+  fields.actionDescription.value = ticket.nextAction?.description ?? '';
+  fields.actionResponsible.value = ticket.nextAction?.responsible ?? '';
+  fields.actionReviewDate.value = ticket.nextAction?.reviewDate ?? '';
+  syncDetailFields(ticket.status);
   $('#save-detail').hidden = !coordinator && transitions[ticket.status].length === 0;
   $('#reload-detail').hidden = true;
   message('#detail-error', '');
@@ -199,7 +245,11 @@ function showTicket(id) {
 if (hosted) {
   $('#login-form').hidden = true;
   $('#login').append(Object.assign(document.createElement('p'), {
-    textContent: 'Esta cuenta aún no está vinculada al piloto. Solicita acceso al coordinador.',
+    textContent: 'Entra con una cuenta autorizada para consultar las solicitudes del piloto.',
+  }), Object.assign(document.createElement('a'), {
+    href: '/signin-with-chatgpt?return_to=%2F',
+    target: '_top',
+    textContent: 'Iniciar sesión con ChatGPT',
   }));
 }
 $('#mode').textContent = local ? 'Demo local' : 'Piloto compartido';
@@ -281,14 +331,29 @@ $('#refresh').addEventListener('click', event => run(event.currentTarget, refres
 $('#filters').addEventListener('input', renderTickets);
 $('#filters').addEventListener('submit', event => event.preventDefault());
 $('#client-query').addEventListener('input', renderClients);
-$('#new').addEventListener('click', () => {
+$('#refresh-summary').addEventListener('click', event => run(event.currentTarget, refresh));
+$('#new').addEventListener('click', event => run(event.currentTarget, async () => {
   message('#notice', '');
+  await refresh();
+  if (!actor) return;
+  renderRelatedTickets();
   $('#create-dialog').showModal();
-});
+}));
 document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => $('#' + button.dataset.close).close()));
-$('#create-form').elements.nit.addEventListener('input', event => {
-  const nit = event.target.value.trim();
-  $('#client-match').textContent = data.clients.find(client => client.nit === nit)?.name ?? (nit ? 'No hay coincidencias.' : '');
+for (const name of ['nit', 'order']) $('#create-form').elements[name].addEventListener('input', renderRelatedTickets);
+$('#related-tickets').addEventListener('click', event => {
+  const button = event.target.closest('[data-ticket]');
+  if (!button) return;
+  run(button, async () => {
+    await refresh();
+    if (!actor || !$('#create-dialog').open) return;
+    if (!data.tickets.some(ticket => ticket.id === button.dataset.ticket)) {
+      message('#create-error', 'La solicitud ya no está disponible para tu cuenta.', true);
+      return;
+    }
+    $('#create-dialog').close();
+    showTicket(button.dataset.ticket);
+  }, error => message('#create-error', error.message, true));
 });
 $('#create-form').addEventListener('submit', event => {
   event.preventDefault();
@@ -309,14 +374,16 @@ $('#ticket-table').addEventListener('click', event => {
   if (ticket) showTicket(ticket.dataset.ticket);
 });
 $('#detail-form').addEventListener('change', event => {
-  if (event.target.name === 'status') $('#response-field').hidden = event.target.value !== 'Resuelto' || editing.status === 'Resuelto';
+  if (event.target.name === 'status') syncDetailFields(event.target.value);
 });
 $('#detail-form').addEventListener('submit', event => {
   event.preventDefault();
   const form = event.currentTarget;
   const id = editing.id;
   run($('#save-detail'), async () => {
-    const input = { ...inputs(form), version: editing.version };
+    const { actionDescription, actionResponsible, actionReviewDate, ...fields } = inputs(form);
+    const input = { ...fields, version: editing.version };
+    if (pending(input.status)) input.nextAction = { description: actionDescription, responsible: actionResponsible, reviewDate: actionReviewDate };
     if (local) updateTicket(state, actor, id, input);
     else await api('tickets/' + id, 'PATCH', input);
     await refresh();

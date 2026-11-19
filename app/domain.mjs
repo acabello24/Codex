@@ -18,6 +18,32 @@ export const transitions = {
 export const states = Object.keys(transitions);
 export const hours = (date, now = Date.now()) => (now - Date.parse(date)) / 3_600_000;
 export const overdue = (ticket, now) => !ticket.resolvedAt && hours(ticket.receivedAt, now) > 48;
+export const pending = status => ['Pendiente logística', 'Pendiente ventas'].includes(status);
+const slaHours = 48;
+
+export function slaNotice(ticket, now = Date.now()) {
+  if (ticket.resolvedAt) return '';
+  const age = hours(ticket.receivedAt, now);
+  if (age > slaHours) return 'Vencida';
+  if (age >= 36) return 'Plazo crítico';
+  if (age >= 24) return 'Aviso de plazo';
+  return '';
+}
+
+export function weeklySummary(tickets, now = Date.now()) {
+  const inWeek = stamp => typeof stamp === 'string' && hours(stamp, now) >= 0 && hours(stamp, now) <= 168;
+  const received = tickets.filter(ticket => inWeek(ticket.receivedAt));
+  const resolved = tickets.filter(ticket => inWeek(ticket.resolvedAt));
+  const complaints = received.filter(ticket => ['Inconformidad de envío', 'Facturación o cobro', 'Devolución'].includes(ticket.type));
+  return {
+    received: received.length, resolved: resolved.length,
+    onTime: resolved.filter(ticket => ticket.withinSla).length,
+    openByAgent: agents.map(agent => ({ name: agent.name, count: tickets.filter(ticket => !ticket.resolvedAt && ticket.agent === agent.id).length })),
+    complaints: [...new Set(complaints.map(ticket => ticket.type))].map(type => ({
+      type, count: complaints.filter(ticket => ticket.type === type).length,
+    })).sort((a, b) => b.count - a.count || a.type.localeCompare(b.type, 'es')),
+  };
+}
 const monthFormat = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit' });
 const monthOf = now => monthFormat.formatToParts(now).filter(part => part.type !== 'literal').map(part => part.value).join('');
 const nameOf = id => people.find(person => person.id === id)?.name ?? id;
@@ -49,10 +75,10 @@ export function initialState(now = Date.now()) {
   const examples = [
     [types[1], 'Confirmar la fecha de entrega del pedido de material escolar.', 3],
     [types[2], 'El despacho llegó con dos cajas de papel pendientes.', 53],
-    [types[3], 'El cliente requiere una copia de la factura electrónica.', 23],
+    [types[3], 'El cliente requiere una copia de la factura electrónica.', 27],
     [types[0], 'Consultar disponibilidad de marcadores y carpetas tamaño carta.', 16],
     [types[4], 'Solicita devolver una referencia duplicada del pedido.', 36],
-    [types[1], 'Solicita confirmar la recepción del pedido en portería.', 8],
+    [types[1], 'Solicita confirmar la recepción del pedido en portería.', 39],
   ];
   examples.forEach(([type, description, age], index) => {
     const at = now - age * 3_600_000;
@@ -99,6 +125,19 @@ export function createTicket(state, actor, input, now = Date.now()) {
   return ticket;
 }
 
+function readNextAction(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new DomainError('La próxima acción no es válida.');
+  const action = { description: clean(value.description), responsible: clean(value.responsible), reviewDate: clean(value.reviewDate) };
+  if (!Object.values(action).some(Boolean)) return null;
+  const day = Date.parse(action.reviewDate + 'T00:00:00Z');
+  if (!action.description || action.description.length > 400 || !action.responsible || action.responsible.length > 120 ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(action.reviewDate) || !Number.isFinite(day) ||
+      new Date(day).toISOString().slice(0, 10) !== action.reviewDate) {
+    throw new DomainError('Completa qué falta, quién debe responder y una fecha de revisión válida.');
+  }
+  return action;
+}
+
 export function updateTicket(state, actor, id, input, now = Date.now()) {
   const ticket = state.tickets.find(entry => entry.id === id);
   if (!ticket) throw new DomainError('La solicitud no existe.', 404);
@@ -118,7 +157,12 @@ export function updateTicket(state, actor, id, input, now = Date.now()) {
   if (newStatus === 'Resuelto' && statusChanged && (!response || response.length > 4000)) {
     throw new DomainError('Escribe la respuesta de resolución (máximo 4.000 caracteres).');
   }
-  if (!statusChanged && !agentChanged) return ticket;
+  const previousAction = ticket.nextAction ?? null;
+  const nextAction = pending(newStatus)
+    ? (input.nextAction === undefined ? previousAction : readNextAction(input.nextAction))
+    : null;
+  const actionChanged = JSON.stringify(previousAction) !== JSON.stringify(nextAction);
+  if (!statusChanged && !agentChanged && !actionChanged) return ticket;
   const at = new Date(now).toISOString();
   if (statusChanged) {
     event(ticket, actor, at, 'Cambio de estado', { status: ticket.status }, { status: newStatus });
@@ -132,6 +176,10 @@ export function updateTicket(state, actor, id, input, now = Date.now()) {
     ticket.resolvedAt = at;
     ticket.response = response;
     ticket.withinSla = hours(ticket.receivedAt, now) <= 48;
+  }
+  if (actionChanged) {
+    event(ticket, actor, at, 'Próxima acción', previousAction, nextAction ?? {});
+    ticket.nextAction = nextAction;
   }
   ticket.version++;
   return ticket;
@@ -253,9 +301,10 @@ export function restoreBackup(raw) {
         hours(ticket.receivedAt, Date.parse(ticket.resolvedAt)) < 0 ||
         ticket.withinSla !== (hours(ticket.receivedAt, Date.parse(ticket.resolvedAt)) <= 48)
       : ticket.resolvedAt !== null || ticket.withinSla !== null || ticket.response !== '') bad();
+    if (ticket.nextAction != null && (!pending(ticket.status) || !readNextAction(ticket.nextAction))) bad();
     for (const entry of ticket.history) {
       if (!plain(entry) || !actors.has(entry.actor) || !isDate(entry.at) ||
-          !['Radicación', 'Cambio de estado', 'Reasignación'].includes(entry.action) ||
+          !['Radicación', 'Cambio de estado', 'Reasignación', 'Próxima acción'].includes(entry.action) ||
           (entry.before !== null && !plain(entry.before)) || !plain(entry.after)) bad();
       for (const value of [entry.before, entry.after]) {
         if (value && ((value.agent !== undefined && !ids.has(value.agent)) ||
@@ -268,5 +317,5 @@ export function restoreBackup(raw) {
 }
 
 export function eventValue(value) {
-  return [value?.status, value?.agent && nameOf(value.agent)].filter(Boolean).join(' · ');
+  return [value?.status, value?.agent && nameOf(value.agent), value?.description, value?.responsible, value?.reviewDate].filter(Boolean).join(' · ');
 }

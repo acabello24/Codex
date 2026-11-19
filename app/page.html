@@ -12,6 +12,7 @@
   <nav id="navigation" aria-label="Navegación" hidden>
     <button type="button" data-page="tickets" aria-current="page"><span aria-hidden="true">▤</span> Solicitudes</button>
     <button type="button" data-page="clients"><span aria-hidden="true">♧</span> Directorio</button>
+    <button type="button" data-page="summary" hidden>Resumen semanal</button>
     <button type="button" data-page="team" hidden><span aria-hidden="true">◉</span> Equipo</button>
   </nav>
   <div class="rail-bottom">
@@ -47,6 +48,7 @@
           <label>Estado<select name="status"></select></label>
           <label>Responsable<select name="agent"></select></label>
           <label>Antigüedad<select name="age"><option value="">Cualquiera</option><option value="recent">Hasta 48 horas</option><option value="older">Más de 48 horas</option></select></label>
+          <label>Orden<select name="sort"><option value="">Más recientes</option><option value="sla">Menor tiempo restante</option></select></label>
         </form>
         <div id="ticket-table" class="table-scroll"></div>
       </section>
@@ -72,6 +74,10 @@
         <div id="interaction-table" class="table-scroll"></div>
       </section>
     </section>
+    <section id="summary" hidden>
+      <div class="heading"><div><h1>Resumen semanal</h1><p>Últimas 168 horas</p></div><button id="refresh-summary" type="button" class="secondary">Actualizar</button></div>
+      <div id="summary-content"></div>
+    </section>
     <section id="team" hidden><div class="heading"><div><h1>Equipo</h1><p>Gestiona quién recibe nuevas solicitudes.</p></div></div><section class="panel" id="team-list"></section></section>
   </div>
 </main>
@@ -83,6 +89,7 @@
     <div class="form-line"><label>Canal<select name="channel" required></select></label><label>Tipo de solicitud<select name="type" required></select></label></div>
     <label>Referencia de pedido <small>(opcional)</small><input name="order" maxlength="80"></label>
     <label>Descripción<textarea name="description" required minlength="10" maxlength="4000" rows="4"></textarea></label>
+    <div id="related-tickets" hidden></div>
     <p id="create-error" class="error" role="alert" hidden></p>
     <button class="primary">Radicar solicitud</button>
   </form>
@@ -93,6 +100,11 @@
   <form id="detail-form" class="stack">
     <div class="form-line" id="detail-fields"></div>
     <label id="response-field" hidden>Respuesta al cliente<textarea name="response" maxlength="4000" rows="3"></textarea></label>
+    <fieldset id="next-action" class="stack" hidden disabled>
+      <legend>Próxima acción</legend>
+      <label>Qué falta<textarea name="actionDescription" maxlength="400" rows="2"></textarea></label>
+      <div class="form-line"><label>Quién debe responder<input name="actionResponsible" maxlength="120"></label><label>Fecha de revisión<input name="actionReviewDate" type="date"></label></div>
+    </fieldset>
     <p id="detail-error" class="error" role="alert" hidden></p>
     <div class="actions"><button class="primary" id="save-detail">Guardar cambios</button><button class="secondary" id="reload-detail" type="button" hidden>Recargar caso</button></div>
   </form>

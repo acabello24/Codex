@@ -14,6 +14,7 @@ let actor = local ? initialAccount : null;
 let data;
 let currentPage = 'tickets';
 let editing;
+let selectedNit;
 
 async function api(path, method = 'GET', body) {
   const response = await fetch('/api/' + path, {
@@ -53,6 +54,11 @@ async function refresh() {
     data = null;
     document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
   }
+  if (currentPage === 'interactions' && $('#detail-dialog').open &&
+      !data?.tickets.some(ticket => ticket.id === editing?.id)) {
+    $('#detail-dialog').close();
+    editing = undefined;
+  }
   render();
 }
 
@@ -69,10 +75,13 @@ function render() {
     $('#' + key).hidden = !signedIn || key !== currentPage;
     $('[data-page="' + key + '"]').setAttribute('aria-current', key === currentPage ? 'page' : 'false');
   }
+  $('#interactions').hidden = !signedIn || currentPage !== 'interactions';
+  if (currentPage === 'interactions') $('[data-page="clients"]').setAttribute('aria-current', 'page');
   if (!signedIn) return;
   $('#import-box').hidden = !coordinator;
   renderTickets();
   renderClients();
+  if (currentPage === 'interactions') renderInteractions();
   renderTeam();
 }
 
@@ -116,10 +125,27 @@ function renderClients() {
   const query = $('#client-query').value;
   const clients = data.clients.filter(client => matches(query, client.nit, client.name));
   $('#client-table').innerHTML = clients.length
-    ? '<table><thead><tr><th>NIT</th><th>Razón social</th></tr></thead><tbody>' +
-      clients.map(client => '<tr><td>' + escape(client.nit) + '</td><td>' + escape(client.name) + '</td></tr>').join('') + '</tbody></table>'
+    ? '<table><thead><tr><th>NIT</th><th>Razón social</th><th>Acción</th></tr></thead><tbody>' +
+      clients.map(client => '<tr><td>' + escape(client.nit) + '</td><td>' + escape(client.name) + '</td><td><button type="button" class="ticket-link" data-client="' +
+        escape(client.nit) + '">Ver interacciones</button></td></tr>').join('') + '</tbody></table>'
     : '<p class="empty">No hay clientes que coincidan con la búsqueda.</p>';
   $('#client-options').innerHTML = data.clients.map(client => option(client.nit, client.name)).join('');
+}
+
+function renderInteractions() {
+  const client = data.clients.find(entry => entry.nit === selectedNit);
+  $('#interaction-client').textContent = client?.name ?? 'Interacciones';
+  $('#interaction-nit').textContent = client ? 'NIT ' + client.nit : '';
+  const tickets = client ? data.tickets.filter(ticket => ticket.nit === client.nit)
+    .sort((first, second) => Date.parse(second.receivedAt) - Date.parse(first.receivedAt) ||
+      second.id.localeCompare(first.id)) : [];
+  $('#interaction-table').innerHTML = tickets.length
+    ? '<table><thead><tr><th>Recepción</th><th>Canal</th><th>Ticket</th><th>Tipo</th><th>Estado</th><th>Responsable</th></tr></thead><tbody>' +
+      tickets.map(ticket => '<tr><td>' + escape(date.format(new Date(ticket.receivedAt))) +
+        '</td><td>' + escape(ticket.channel) + '</td><td><button type="button" class="ticket-link" data-ticket="' +
+        escape(ticket.id) + '">' + escape(ticket.id) + '</button></td><td>' + escape(ticket.type) +
+        '</td><td>' + escape(ticket.status) + '</td><td>' + escape(nameOf(ticket.agent)) + '</td></tr>').join('') + '</tbody></table>'
+    : '<p class="empty">No hay interacciones disponibles para este cliente.</p>';
 }
 
 function renderTeam() {
@@ -193,6 +219,41 @@ $('#navigation').addEventListener('click', event => {
   currentPage = button.dataset.page;
   message('#notice', '');
   render();
+});
+const interactionError = () => message('#notice', 'No se pudo actualizar el historial de interacciones.', true);
+$('#client-table').addEventListener('click', event => {
+  const button = event.target.closest('[data-client]');
+  if (!button) return;
+  run(button, async () => {
+    await refresh();
+    if (!actor || currentPage !== 'clients') return;
+    selectedNit = button.dataset.client;
+    currentPage = 'interactions';
+    message('#notice', '');
+    render();
+    $('#back-to-clients').focus();
+  }, interactionError);
+});
+$('#back-to-clients').addEventListener('click', () => {
+  currentPage = 'clients';
+  message('#notice', '');
+  render();
+  [...$('#client-table').querySelectorAll('[data-client]')].find(button => button.dataset.client === selectedNit)?.focus();
+});
+$('#refresh-interactions').addEventListener('click', event => run(event.currentTarget, async () => {
+  await refresh();
+  message('#notice', '');
+}, interactionError));
+$('#interaction-table').addEventListener('click', event => {
+  const button = event.target.closest('[data-ticket]');
+  if (!button) return;
+  run(button, async () => {
+    const nit = selectedNit;
+    await refresh();
+    if (!actor || currentPage !== 'interactions' || nit !== selectedNit) return;
+    [...$('#interaction-table').querySelectorAll('[data-ticket]')].find(entry => entry.dataset.ticket === button.dataset.ticket)?.focus();
+    showTicket(button.dataset.ticket);
+  }, interactionError);
 });
 $('#profile').addEventListener('change', async event => {
   actor = people.find(person => person.id === event.target.value);
